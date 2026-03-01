@@ -199,6 +199,9 @@ export class SyncWrapperService {
       return 'HANDLED_ERROR';
     }
 
+    // Clear suppression so encryption dialogs can appear again on each sync attempt
+    this._suppressEncryptionDialogs = false;
+
     // Race condition fix: Check-and-set atomically before starting sync
     if (this._isSyncInProgress$.getValue()) {
       SyncLog.log('Sync already in progress, skipping concurrent sync attempt');
