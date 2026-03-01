@@ -249,8 +249,15 @@ export const startApp = (): void => {
     }, CONFIG.IDLE_PING_INTERVAL);
     // --------END IDLE HANDLING---------
 
+    // Track whether window was visible before suspend/lock so we only
+    // restore keyboard focus for windows that were actually in use.
+    // Using showOrFocus() unconditionally would surface hidden/minimized
+    // windows on every wake/unlock — a UX regression.
+    let wasVisibleBeforeSuspend = false;
+
     powerMonitor.on('suspend', () => {
       log('powerMonitor: System suspend detected');
+      wasVisibleBeforeSuspend = mainWin.isVisible() && !mainWin.isMinimized();
       setIsLocked(true);
       suspendStart = Date.now();
       mainWin.webContents.send(IPC.SUSPEND);
@@ -258,6 +265,7 @@ export const startApp = (): void => {
 
     powerMonitor.on('lock-screen', () => {
       log('powerMonitor: Screen lock detected');
+      wasVisibleBeforeSuspend = mainWin.isVisible() && !mainWin.isMinimized();
       setIsLocked(true);
       suspendStart = Date.now();
       mainWin.webContents.send(IPC.SUSPEND);
@@ -269,6 +277,10 @@ export const startApp = (): void => {
       setIsLocked(false);
       sendIdleMsgIfOverMin(idleTime);
       mainWin.webContents.send(IPC.RESUME);
+      // Restore keyboard focus only if window was visible before suspend (electron#20464)
+      if (wasVisibleBeforeSuspend) {
+        showOrFocus(mainWin);
+      }
     });
 
     powerMonitor.on('unlock-screen', () => {
@@ -277,6 +289,10 @@ export const startApp = (): void => {
       setIsLocked(false);
       sendIdleMsgIfOverMin(idleTime);
       mainWin.webContents.send(IPC.RESUME);
+      // Restore keyboard focus only if window was visible before lock (electron#20464)
+      if (wasVisibleBeforeSuspend) {
+        showOrFocus(mainWin);
+      }
     });
 
     protocol.registerFileProtocol('file', (request, callback) => {
