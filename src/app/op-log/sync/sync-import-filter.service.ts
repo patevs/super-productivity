@@ -6,6 +6,7 @@ import {
   VectorClockComparison,
   vectorClockToString,
 } from '../../core/util/vector-clock';
+import { MAX_VECTOR_CLOCK_SIZE } from '../core/operation-log.const';
 import { OpLog } from '../../core/log';
 
 /**
@@ -58,10 +59,12 @@ export class SyncImportFilterService {
    * | GREATER_THAN   | Op created after seeing import       | ✅ Keep |
    * | EQUAL          | Same causal history as import        | ✅ Keep |
    * | LESS_THAN      | Op dominated by import               | ❌ Filter|
-   * | CONCURRENT     | Op created without knowledge of import| ❌ Filter|
+   * | CONCURRENT     | See below                            | Depends |
    *
-   * CONCURRENT ops are filtered even if they come from a client the import
-   * didn't know about. This ensures a true "restore to point in time" semantic.
+   * CONCURRENT ops from **unknown clients** (import clock has no entry for the
+   * op's clientId) are KEPT when the import clock hasn't been pruned
+   * (size < MAX_VECTOR_CLOCK_SIZE). These represent independent timelines
+   * the import never intended to supersede. All other CONCURRENT ops are filtered.
    *
    * The import can be in the current batch OR in the local store from a
    * previous sync cycle. We check both to handle the case where old ops from
@@ -169,12 +172,9 @@ export class SyncImportFilterService {
       // Clean Slate Semantics:
       // - GREATER_THAN: Op was created by a client that SAW the import → KEEP
       // - EQUAL: Same causal history as import → KEEP
-      // - CONCURRENT: Op created WITHOUT knowledge of import → FILTER
+      // - CONCURRENT + unknown client (not in import clock, clock not pruned) → KEEP
+      // - CONCURRENT (all other cases) → FILTER
       // - LESS_THAN: Op is dominated by import → FILTER
-      //
-      // CONCURRENT ops are filtered even from "unknown" clients. The import is
-      // an explicit user action to restore to a specific state - any concurrent
-      // work is intentionally discarded to ensure a clean slate.
       const comparison = compareVectorClocks(op.vectorClock, importClockForComparison);
 
       // DIAGNOSTIC LOGGING: Log vector clock comparison details
@@ -207,6 +207,22 @@ export class SyncImportFilterService {
         OpLog.normal(
           `SyncImportFilterService: KEEPING op ${op.id} (${op.actionType}) despite CONCURRENT - same client as import.\n` +
             `  Client ${op.clientId} counter: op=${op.vectorClock[op.clientId]} > import=${importClockForComparison[op.clientId]} (post-import op).`,
+        );
+        validOps.push(op);
+      } else if (
+        comparison === VectorClockComparison.CONCURRENT &&
+        importClockForComparison[op.clientId] === undefined &&
+        Object.keys(importClockForComparison).length < MAX_VECTOR_CLOCK_SIZE
+      ) {
+        // Import has NO knowledge of this client — independent timelines that never
+        // communicated. The import was created in complete ignorance of this client.
+        // Filtering would silently discard data the import never intended to supersede.
+        //
+        // Safety: only apply when clock hasn't been pruned (size < MAX_VECTOR_CLOCK_SIZE).
+        // If pruning occurred, a missing entry might be a pruned one, not truly unknown.
+        OpLog.normal(
+          `SyncImportFilterService: KEEPING op ${op.id} (${op.actionType}) despite CONCURRENT ` +
+            `- import has no knowledge of client ${op.clientId} (independent timeline).`,
         );
         validOps.push(op);
       } else {
