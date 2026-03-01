@@ -300,10 +300,9 @@ export const SYNC_FORM: ConfigFormSection<SyncConfig> = {
             onClick: async (field: FormlyFieldConfig) => {
               const isSuperSync =
                 field?.parent?.parent?.model?.syncProvider === SyncProviderId.SuperSync;
-              const result = isSuperSync
-                ? await openEncryptionPasswordChangeDialog()
-                : await openEncryptionPasswordChangeDialogForFileBased();
-              return result?.success ? true : false;
+              await (isSuperSync
+                ? openEncryptionPasswordChangeDialog()
+                : openEncryptionPasswordChangeDialogForFileBased());
             },
           },
         },
@@ -330,7 +329,6 @@ export const SYNC_FORM: ConfigFormSection<SyncConfig> = {
                 }
                 closeAllDialogs();
               }
-              return result?.success ? true : false;
             },
           },
         },
@@ -393,6 +391,10 @@ export const SYNC_FORM: ConfigFormSection<SyncConfig> = {
               const baseUrl = field.model.baseUrl || SUPER_SYNC_DEFAULT_BASE_URL;
               window.open(baseUrl, '_blank');
             },
+          },
+          expressionProperties: {
+            'templateOptions.btnStyle': (model: any) =>
+              model.accessToken ? 'stroked' : undefined,
           },
         },
         {
